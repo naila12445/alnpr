@@ -1,5 +1,6 @@
 {
-    "frame_interval": 100,
+    "ip_stream": "http://192.168.29.31:8080/video",
+    "frame_interval": 300,
     "confidence_threshold": 0.5,
-    "ip_stream": "http://192.168.29.31:8080/video"
+    "fuzzy_match_threshold": 0.7
 }

@@ -1,13 +1,19 @@
 # ==============================================================
-# ANPR (YOLOv8 + EasyOCR) – Headless + Config + Fuzzy Matching
+# ANPR (YOLOv8 + EasyOCR) – Clean Console Output
 # ==============================================================
 
 import cv2
 import json
 import re
+import warnings
 from ultralytics import YOLO
 import easyocr
 from difflib import SequenceMatcher
+
+# Suppress all unnecessary warnings and YOLO logs
+warnings.filterwarnings("ignore")
+import logging
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
 # --------------------------------------------------------------
 # Load Configurations
@@ -35,11 +41,9 @@ fuzzy_threshold = config.get("fuzzy_match_threshold", 0.7)
 # Helper: Clean OCR text
 # --------------------------------------------------------------
 def clean_plate_text(text):
-    text = re.sub(r'\bIND(?:IA)?\b', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'[HU]?IND(?:IA)?', '', text, flags=re.IGNORECASE)
     text = text.upper()
     text = re.sub(r'[^A-Z0-9]', '', text)
-
-    # Fix common OCR mistakes
     text = text.replace("I6", "G").replace("16", "G").replace("1G", "G")
     text = text.replace("O", "0")
     text = text.replace("B", "8") if re.match(r"[A-Z]{2}\d", text) else text.replace("8", "B")
@@ -52,8 +56,8 @@ def is_plate_registered(cleaned, registered_plates, threshold):
     for plate in registered_plates:
         ratio = SequenceMatcher(None, cleaned, plate).ratio()
         if ratio >= threshold:
-            return True, plate, ratio
-    return False, None, 0
+            return True, plate
+    return False, None
 
 # --------------------------------------------------------------
 # Process Stream (Headless)
@@ -65,20 +69,17 @@ if not cap.isOpened():
     print(f"Unable to open stream: {ip_stream}")
     exit(1)
 
-print("ANPR system running in headless mode... Press Ctrl+C to stop.")
-
 try:
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("Stream ended or not accessible.")
             break
 
         frame_count += 1
         if frame_count % frame_interval != 0:
             continue
 
-        results = model(frame)
+        results = model.predict(frame, verbose=False)  # disable YOLO logs
         boxes = results[0].boxes
 
         for box in boxes:
@@ -87,26 +88,19 @@ try:
 
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             plate_crop = frame[y1:y2, x1:x2]
-
             ocr_result = reader.readtext(plate_crop, detail=0)
 
             if ocr_result:
                 raw = " ".join(ocr_result)
                 cleaned = clean_plate_text(raw)
-
-                print(f"\nRaw OCR: {raw}")
-                print(f"Cleaned Plate: {cleaned}")
-
-                matched, reg_plate, score = is_plate_registered(cleaned, registered_plates, threshold=fuzzy_threshold)
+                matched, reg_plate = is_plate_registered(cleaned, registered_plates, threshold=fuzzy_threshold)
 
                 if matched:
-                    print(f"Registered plate '{reg_plate}' detected (match {score:.2f}) → Open boom barrier")
+                    print(f"Registered plate '{reg_plate}' detected → Open boom barrier")
                 else:
                     print(f"Unregistered plate '{cleaned}' detected → Access denied")
 
 except KeyboardInterrupt:
-    print("\nANPR stopped manually.")
-
+    pass
 finally:
     cap.release()
-    print("Stream closed. Exiting gracefully.")
